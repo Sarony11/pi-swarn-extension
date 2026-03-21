@@ -22,6 +22,10 @@ We are currently focusing on making the agents context-aware and deeply integrat
   - *Impact*: Enables multi-repository agentic workflows seamlessly.
 
 ## 🔜 Next (Short-term)
+- [ ] **Phase 7: Multi-Provider LLM Support (Anthropic / OpenAI)**
+  - *Goal*: Remove the hardcoded dependency on `GEMINI_API_KEY` and `gemini/*` models. Leverage LiteLLM to dynamically inject the correct API keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) based on the model specified in the `team.yaml`.
+  - *Impact*: Makes the extension truly provider-agnostic, allowing community users to bring their preferred models (like Claude 3.5 Sonnet or GPT-4o) to their swarms.
+
 - [ ] **Phase 8: Pi Skill Proxy (JSON-RPC Bridge)**
   - *Goal*: Allow CrewAI agents to invoke native Pi Skills via the Stdin/Stdout JSON-RPC bridge.
   - *Impact*: Subagents will be able to trigger complex IDE actions (like running tests, compiling, or triggering git commands) using Pi as a proxy.

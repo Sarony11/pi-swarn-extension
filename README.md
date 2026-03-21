@@ -102,7 +102,8 @@ tasks:
 2. **Virtual Environment**: A venv must be created at `~/.pi/agent/swarms/venv`.
 3. **CrewAI & LiteLLM**: Installed inside the venv (`pip install crewai litellm google-genai requests`).
 4. **API Keys**:
-   * `GEMINI_API_KEY`: Required for the LLM inference.
+   * `GEMINI_API_KEY`: Required for the default LLM inference.
+   * *(Coming Soon)* `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`: For multi-provider model support.
    * `BRAVE_SEARCH_API_KEY`: Required if using the `read-web` tool level.
 
 ### Installation
