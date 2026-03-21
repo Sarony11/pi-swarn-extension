@@ -128,7 +128,7 @@ def load_global_context(workspace_dir: str) -> str:
                 
     return context_content
 
-def run_real_swarm(team_dir: str, context: Dict[str, Any]):
+def run_real_swarm(team_dir: str, context: Dict[str, Any], focused_paths: list):
     team_data = load_yaml(os.path.join(team_dir, "team.yaml"))
     blueprint_data = load_yaml(os.path.join(team_dir, "blueprint.yaml"))
     
@@ -169,7 +169,12 @@ def run_real_swarm(team_dir: str, context: Dict[str, Any]):
             agent_tools = [list_directory_tool, read_file_tool, write_file_tool, brave_search_tool]
             rbac_prompt = "\n\n[SYSTEM CONSTRAINT] You are operating in READ-WRITE mode. You have full access to local files, internet search, and can create/overwrite files."
             
-        enhanced_backstory = agent_config['backstory'] + rbac_prompt + global_rules
+        focus_prompt = ""
+        if focused_paths:
+            paths_str = "\n- ".join(focused_paths)
+            focus_prompt = f"\n\n[WORKSPACE FOCUS] Your Root Workspace is {workspace}. However, for this specific task, you MUST focus your attention strictly on the following paths:\n- {paths_str}"
+            
+        enhanced_backstory = agent_config['backstory'] + rbac_prompt + global_rules + focus_prompt
 
         agent = Agent(
             role=agent_config['role'],
@@ -222,7 +227,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--team-dir", required=True)
     parser.add_argument("--context", required=False, default="{}")
+    parser.add_argument("--focused-paths", required=False, default="[]")
     args = parser.parse_args()
     
     context_data = json.loads(args.context)
-    run_real_swarm(args.team_dir, context_data)
+    focused_paths = json.loads(args.focused_paths)
+    run_real_swarm(args.team_dir, context_data, focused_paths)

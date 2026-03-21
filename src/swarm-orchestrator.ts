@@ -5,56 +5,90 @@ import * as os from "os";
 
 export default function (pi: ExtensionAPI) {
   pi.registerCommand("swarm", {
-    description: "Launch a CrewAI swarm. Usage: /swarm [team-name] [\"prompt\"]",
+    description: "Launch a CrewAI swarm. Usage: /swarm <team-name> [--focus] \"prompt\"",
     handler: async (args: string, context: any) => {
       const cwd = context.cwd;
+      const metaWorkspace = process.env.PI_META_WORKSPACE || path.join(os.homedir(), "repos");
       
       let explicitTeamName = "";
       let userPrompt = "";
+      let isStrictFocus = false;
 
       // Parse arguments gracefully
       const parts = args.trim().split(" ");
-      if (parts.length > 0 && parts[0] && !parts[0].startsWith('"')) {
-         explicitTeamName = parts[0];
-         userPrompt = parts.slice(1).join(" ");
-      } else {
-         userPrompt = parts.join(" ");
+      let promptParts = [];
+      
+      for (let i = 0; i < parts.length; i++) {
+        if (parts[i] === "--focus") {
+          isStrictFocus = true;
+        } else if (!explicitTeamName && !parts[i].startsWith('"') && i === 0) {
+          explicitTeamName = parts[i];
+        } else {
+          promptParts.push(parts[i]);
+        }
       }
+      
+      userPrompt = promptParts.join(" ");
       
       // Clean up surrounding quotes from prompt
       if (userPrompt.startsWith('"') && userPrompt.endsWith('"')) {
           userPrompt = userPrompt.substring(1, userPrompt.length - 1);
       }
 
-      // Catalog context
-      const catalogPath = path.join(cwd, "catalog-info.yaml");
-      let system = "unknown-system";
-      let domain = "unknown-domain";
-      let componentName = path.basename(cwd);
-
-      if (fs.existsSync(catalogPath)) {
-        const catalogContent = fs.readFileSync(catalogPath, "utf-8");
-        const systemMatch = catalogContent.match(/system:\s*([^\s]+)/);
-        const domainMatch = catalogContent.match(/domain:\s*([^\s]+)/);
-        const nameMatch = catalogContent.match(/name:\s*([^\s]+)/);
-
-        if (systemMatch) system = systemMatch[1].replace(/['"]/g, '');
-        if (domainMatch) domain = domainMatch[1].replace(/['"]/g, '');
-        if (nameMatch) componentName = nameMatch[1].replace(/['"]/g, '');
-      } else {
-        system = "demo-system";
-        domain = "experimental";
+      // 1. Extract Explicit @paths
+      let focusedPaths: string[] = [];
+      const atPathRegex = /@([\w-]+\/[\w-]+(?:\/[\w-]+)*)/g;
+      let match;
+      while ((match = atPathRegex.exec(userPrompt)) !== null) {
+        const resolvedPath = path.join(metaWorkspace, match[1]);
+        focusedPaths.push(resolvedPath);
       }
 
-      let teamName = explicitTeamName || "demo-team"; 
+      // 2. Catalog Discovery (if not strict)
+      if (!isStrictFocus) {
+        const catalogDir = path.join(metaWorkspace, "resource-catalog", "components");
+        if (fs.existsSync(catalogDir)) {
+          const files = fs.readdirSync(catalogDir);
+          for (const file of files) {
+            if (file.endsWith(".yaml") || file.endsWith(".yml")) {
+              const content = fs.readFileSync(path.join(catalogDir, file), "utf-8");
+              
+              // Poor man's YAML parsing for performance and zero-dependencies
+              const nameMatch = content.match(/name:\s*"?([\w-]+)"?/);
+              const systemMatch = content.match(/system:\s*"?([\w-]+)"?/);
+              const domainMatch = content.match(/domain:\s*"?([\w-]+)"?/);
+              const localPathMatch = content.match(/agentic\.pi\/workspace-path:\s*"?([^"\n]+)"?/);
 
-      
-      // Check for custom agent-library location, fallback to default public setup if not found
+              const compName = nameMatch ? nameMatch[1] : "";
+              const compSystem = systemMatch ? systemMatch[1] : "";
+              const compDomain = domainMatch ? domainMatch[1] : "unknown";
+
+              // Check if prompt mentions the component or system
+              const promptLower = userPrompt.toLowerCase();
+              if ((compName && promptLower.includes(compName.toLowerCase())) || 
+                  (compSystem && promptLower.includes(compSystem.toLowerCase()))) {
+                
+                let targetPath = "";
+                if (localPathMatch) {
+                  targetPath = path.join(metaWorkspace, localPathMatch[1].trim());
+                } else {
+                  targetPath = path.join(metaWorkspace, compDomain, compName);
+                }
+                focusedPaths.push(targetPath);
+              }
+            }
+          }
+        }
+      }
+
+      // Deduplicate paths
+      focusedPaths = [...new Set(focusedPaths)];
+
+      // Team Resolution
+      let teamName = explicitTeamName || "demo-team"; 
       let agentLibraryPath = process.env.PI_AGENT_LIBRARY || path.join(os.homedir(), ".pi", "agent-library");
-      
-      // Saul's specific setup fallback
-      if (!fs.existsSync(agentLibraryPath) && fs.existsSync(path.join(os.homedir(), "repos", "agent-library"))) {
-         agentLibraryPath = path.join(os.homedir(), "repos", "agent-library");
+      if (!fs.existsSync(agentLibraryPath) && fs.existsSync(path.join(metaWorkspace, "agent-library"))) {
+         agentLibraryPath = path.join(metaWorkspace, "agent-library");
       }
       
       const teamDir = path.join(agentLibraryPath, "swarms", teamName);
@@ -70,33 +104,27 @@ export default function (pi: ExtensionAPI) {
       }
 
       const contextVars = { 
-        topic: componentName,
-        system: system,
-        domain: domain,
         workspace: cwd,
         prompt: userPrompt || "Please analyze the current project state."
       };
       
-      const jsonContext = JSON.stringify(contextVars);
-      const safeJson = jsonContext.replace(/'/g, "'\\''");
-      const cmd = `~/.pi/agent/swarms/venv/bin/python ${runnerPath} --team-dir ${teamDir} --context '${safeJson}' < /dev/null`;
+      const jsonContext = JSON.stringify(contextVars).replace(/'/g, "'\\''");
+      const jsonPaths = JSON.stringify(focusedPaths).replace(/'/g, "'\\''");
+      
+      const cmd = `~/.pi/agent/swarms/venv/bin/python ${runnerPath} --team-dir ${teamDir} --context '${jsonContext}' --focused-paths '${jsonPaths}' < /dev/null`;
 
-      // UI Feedback - Show progress in the chat window
       context.ui.notify(`🚀 Swarm [${teamName}] is waking up and thinking... this might take a minute depending on the LLM.`, "info");
       
-      // Execute asynchronously to not block Pi's event loop entirely, although execSync blocks node 
-      // it's better to use promises with exec to allow UI to render.
       const { exec } = require("child_process");
-      
       return new Promise<void>((resolve) => {
           exec(cmd, { encoding: "utf8" }, (error: any, stdout: string, stderr: string) => {
               if (error) {
                   const errorMsg = `[Swarm Error]\n\n${error.message}\n\n${stderr}`;
                   context.ui.notify("Swarm encountered an error.", "error");
-                  console.log(errorMsg); // This will appear in the chat history
+                  console.log(errorMsg);
               } else {
                   context.ui.notify("✅ Swarm completed successfully!", "info");
-                  console.log(`[Swarm Result: ${teamName}]\n\n` + stdout); // Print output to chat
+                  console.log(`[Swarm Result: ${teamName}]\n\n` + stdout);
               }
               resolve();
           });
@@ -104,5 +132,5 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  console.log("[Swarm Extension] Loaded. Teams available: demo-team, reviewer-team.");
+  console.log("[Swarm Extension] Loaded. Multi-Repo Smart Routing enabled.");
 }
