@@ -1,0 +1,11 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: pi-swarm-extension
+  description: Extension for Pi Coding Agent to orchestrate CrewAI Swarms
+spec:
+  type: library
+  lifecycle: experimental
+  owner: user:saul
+  system: pi-ecosystem
+  domain: personal
