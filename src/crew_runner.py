@@ -23,7 +23,9 @@ def list_directory_tool(path: str) -> str:
     """Lists the contents of a directory. Use this to explore the workspace. If path starts with @, it maps to ~/repos/."""
     try:
         if path.startswith('@'): 
-            path = path.replace('@', '~/repos/', 1)
+            # Provide a fallback generic mapping for public users
+            base_dir = os.environ.get('PI_META_WORKSPACE', '~/repos/')
+            path = path.replace('@', base_dir, 1)
         expanded_path = os.path.expanduser(path)
         if not os.path.exists(expanded_path): 
             return f"Error: '{path}' does not exist."
@@ -39,7 +41,8 @@ def read_file_tool(path: str) -> str:
     """Reads the content of a file. Use this to examine code, markdown, or config files. Output truncated to 1000 lines. If path starts with @, it maps to ~/repos/."""
     try:
         if path.startswith('@'): 
-            path = path.replace('@', '~/repos/', 1)
+            base_dir = os.environ.get('PI_META_WORKSPACE', '~/repos/')
+            path = path.replace('@', base_dir, 1)
         expanded_path = os.path.expanduser(path)
         if not os.path.exists(expanded_path): 
             return f"Error: '{path}' does not exist."
@@ -59,7 +62,8 @@ def write_file_tool(path: str, content: str) -> str:
     """Writes content to a file. Overwrites if it exists, creates if it doesn't. If path starts with @, it maps to ~/repos/."""
     try:
         if path.startswith('@'): 
-            path = path.replace('@', '~/repos/', 1)
+            base_dir = os.environ.get('PI_META_WORKSPACE', '~/repos/')
+            path = path.replace('@', base_dir, 1)
         expanded_path = os.path.expanduser(path)
         # Ensure directory exists
         os.makedirs(os.path.dirname(expanded_path), exist_ok=True)

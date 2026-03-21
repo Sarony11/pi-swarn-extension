@@ -40,7 +40,7 @@ The extension supports "Meta-Workspace" routing. If you use `@domain/repository`
 
 ## 🛠️ Configuration & Customization
 
-Swarms are configured declaratively via YAML files, usually stored in your `agent-library/swarms/` directory.
+Swarms are configured declaratively via YAML files. By default, the extension looks for teams in `~/.pi/agent-library/swarms/`. You can override this by setting the `PI_AGENT_LIBRARY` environment variable.
 
 ### Directory Structure of a Team
 ```
@@ -103,6 +103,8 @@ tasks:
 3. **CrewAI & LiteLLM**: Installed inside the venv (`pip install crewai litellm google-genai requests`).
 4. **API Keys**:
    * `GEMINI_API_KEY`: Required for the default LLM inference.
+   * `PI_AGENT_LIBRARY`: (Optional) Absolute path to your custom agent-library folder.
+   * `PI_META_WORKSPACE`: (Optional) Base path for resolving the `@` syntax (defaults to `~/repos/`).
    * *(Coming Soon)* `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`: For multi-provider model support.
    * `BRAVE_SEARCH_API_KEY`: Required if using the `read-web` tool level.
 

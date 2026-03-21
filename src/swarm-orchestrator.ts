@@ -48,7 +48,16 @@ export default function (pi: ExtensionAPI) {
 
       let teamName = explicitTeamName || "demo-team"; 
 
-      const teamDir = path.join(os.homedir(), "repos", "agent-library", "swarms", teamName);
+      
+      // Check for custom agent-library location, fallback to default public setup if not found
+      let agentLibraryPath = process.env.PI_AGENT_LIBRARY || path.join(os.homedir(), ".pi", "agent-library");
+      
+      // Saul's specific setup fallback
+      if (!fs.existsSync(agentLibraryPath) && fs.existsSync(path.join(os.homedir(), "repos", "agent-library"))) {
+         agentLibraryPath = path.join(os.homedir(), "repos", "agent-library");
+      }
+      
+      const teamDir = path.join(agentLibraryPath, "swarms", teamName);
       if (!fs.existsSync(teamDir)) {
         context.ui.notify(`[Swarm Error] Team directory not found at ${teamDir}`);
         return;
