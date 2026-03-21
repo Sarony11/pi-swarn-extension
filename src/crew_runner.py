@@ -103,9 +103,33 @@ def brave_search_tool(query: str) -> str:
     except Exception as e:
         return f"Search failed: {str(e)}"
 
+
+def load_global_context(workspace_dir: str) -> str:
+    """Attempts to find and read AGENTS.md to inject global rules into agents."""
+    possible_paths = [
+        os.path.join(workspace_dir, "AGENTS.md"),
+        os.path.expanduser("~/.pi/agent/AGENTS.md"),
+        os.path.expanduser("~/repos/AGENTS.md")
+    ]
+    
+    context_content = ""
+    for path in possible_paths:
+        if os.path.exists(path):
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    context_content += f"\n\n--- Global Rules from {os.path.basename(path)} ---\n"
+                    context_content += f.read()
+            except Exception as e:
+                print(f"Warning: Failed to read {path}: {e}")
+                
+    return context_content
+
 def run_real_swarm(team_dir: str, context: Dict[str, Any]):
     team_data = load_yaml(os.path.join(team_dir, "team.yaml"))
     blueprint_data = load_yaml(os.path.join(team_dir, "blueprint.yaml"))
+    
+    workspace = context.get('workspace', os.getcwd())
+    global_rules = load_global_context(workspace)
     
     if "GEMINI_API_KEY" not in os.environ:
         print("Error: GEMINI_API_KEY environment variable is not set.", file=sys.stderr)
@@ -141,7 +165,7 @@ def run_real_swarm(team_dir: str, context: Dict[str, Any]):
             agent_tools = [list_directory_tool, read_file_tool, write_file_tool, brave_search_tool]
             rbac_prompt = "\n\n[SYSTEM CONSTRAINT] You are operating in READ-WRITE mode. You have full access to local files, internet search, and can create/overwrite files."
             
-        enhanced_backstory = agent_config['backstory'] + rbac_prompt
+        enhanced_backstory = agent_config['backstory'] + rbac_prompt + global_rules
 
         agent = Agent(
             role=agent_config['role'],
