@@ -9,6 +9,16 @@ This extension allows you to delegate complex, multi-agent tasks to isolated swa
 ## 🎯 What does it do?
 Instead of forcing the main Pi agent to do all the heavy lifting, the Swarm Extension acts as a manager. You define "Teams" of specialized agents (e.g., a "Code Review Team" with a Senior Developer and a Security Engineer), and Pi orchestrates their execution in the background using Google Gemini models.
 
+
+## 📚 Architecture & Documentation
+
+We use ADRs (Architecture Decision Records) to document the "why" behind our technical choices. You can read them in the `docs/` folder:
+- [RFC-001: Original Proposal](docs/001-swarm-subagents-crewai.md)
+- [ADR-001: Integrated CrewAI Architecture](docs/adrs/001-swarm-architecture.md)
+- [ADR-002: Multi-Repo Smart Routing](docs/adrs/002-multi-repo-smart-routing.md)
+- [ADR-003: Shared Consciousness & Tools](docs/adrs/003-crewai-context-and-tools.md)
+- [ADR-004: RBAC Tooling Configuration](docs/adrs/004-rbac-tooling-configuration.md)
+
 ## 🚀 Quick Start
 
 ### 1. The Command
