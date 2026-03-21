@@ -17,7 +17,7 @@ We are currently focusing on making the agents context-aware and deeply integrat
   - *Goal*: Agents are currently "blind" to workspace rules. We need the runner to dynamically read local or global `AGENTS.md` files and append them to the agent's `backstory`.
   - *Impact*: Subagents will automatically respect domain boundaries, coding guidelines, and user preferences without needing repetitive prompts.
 
-- [ ] **Phase 5: Smart Routing (Catalog-Driven Discovery & `--focus`)**
+- [x] **Phase 5: Smart Routing (Catalog-Driven Discovery & `--focus`)**
   - *Goal*: Allow users to define target workspaces dynamically in the prompt (e.g., `/swarm team "Fix @mms/terraform"`). The TS extension should parse these paths and pass them to the python runner.
   - *Impact*: Enables multi-repository agentic workflows seamlessly.
 
