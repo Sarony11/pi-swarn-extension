@@ -42,17 +42,44 @@ def step_callback(step_output):
         "thought": thought[:100] + "..." if len(thought) > 100 else thought
     })
 
+import datetime
+SESSION_DIR = os.path.expanduser("~/.pi/agent/sessions")
+os.makedirs(SESSION_DIR, exist_ok=True)
+session_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+checkpoint_file = os.path.join(SESSION_DIR, f"swarm_checkpoint_{session_id}.json")
+
 def task_callback(task_output):
     """Hook called when a task finishes."""
     agent_role = getattr(task_output.agent, 'role', 'Unknown Agent') if hasattr(task_output, 'agent') else 'Unknown'
     summary = task_output.summary if hasattr(task_output, 'summary') else ''
+    raw_output = getattr(task_output, 'raw', '')
     
+    # Checkpoint State Backup
+    try:
+        checkpoint_data = {}
+        if os.path.exists(checkpoint_file):
+            with open(checkpoint_file, 'r') as f:
+                checkpoint_data = json.load(f)
+        
+        tasks_done = checkpoint_data.get("tasks", [])
+        tasks_done.append({
+            "agent": agent_role,
+            "summary": summary,
+            "output_preview": raw_output[:500] + "..." if len(raw_output) > 500 else raw_output
+        })
+        checkpoint_data["tasks"] = tasks_done
+        with open(checkpoint_file, 'w') as f:
+            json.dump(checkpoint_data, f, indent=2)
+    except Exception:
+        pass # Failsafe
+        
     # Capture token usage if available in the output
     token_usage = getattr(task_output, 'token_usage', {})
     logger.log_event("task_completed", {
         "agent": agent_role,
         "summary": summary,
-        "tokens": token_usage
+        "tokens": token_usage,
+        "checkpoint": checkpoint_file
     })
 
 def load_yaml(filepath):
@@ -60,19 +87,31 @@ def load_yaml(filepath):
         return yaml.safe_load(f)
 
 
+
+def secure_resolve_path(requested_path: str) -> str:
+    # Virtual Chroot: Ensure agents cannot access arbitrary host files
+    base_dir = os.environ.get('PI_META_WORKSPACE', os.path.expanduser('~/repos/'))
+    if requested_path.startswith('@'):
+        requested_path = requested_path.replace('@', base_dir, 1)
+    
+    expanded = os.path.abspath(os.path.expanduser(requested_path))
+    allowed_dirs = [os.path.abspath(base_dir), os.path.abspath(os.getcwd())]
+    
+    is_allowed = any(expanded.startswith(d) for d in allowed_dirs)
+    if not is_allowed:
+        raise PermissionError(f"Security Alert: Path Traversal Blocked. '{expanded}' is outside the allowed workspace.")
+    
+    return expanded
+
 @tool("List Directory Tool")
 def list_directory_tool(path: str) -> str:
     """Lists the contents of a directory. Use this to explore the workspace. If path starts with @, it maps to ~/repos/."""
     try:
-        if path.startswith('@'): 
-            # Provide a fallback generic mapping for public users
-            base_dir = os.environ.get('PI_META_WORKSPACE', '~/repos/')
-            path = path.replace('@', base_dir, 1)
-        expanded_path = os.path.expanduser(path)
+        expanded_path = secure_resolve_path(path)
         if not os.path.exists(expanded_path): 
-            return f"Error: '{path}' does not exist."
+            return f"Error: '{expanded_path}' does not exist."
         if not os.path.isdir(expanded_path): 
-            return f"Error: '{path}' is not a directory."
+            return f"Error: '{expanded_path}' is not a directory."
         items = os.listdir(expanded_path)
         return f"Contents of {path}:\n" + "\n".join(items)
     except Exception as e:
@@ -82,14 +121,11 @@ def list_directory_tool(path: str) -> str:
 def read_file_tool(path: str) -> str:
     """Reads the content of a file. Use this to examine code, markdown, or config files. Output truncated to 1000 lines. If path starts with @, it maps to ~/repos/."""
     try:
-        if path.startswith('@'): 
-            base_dir = os.environ.get('PI_META_WORKSPACE', '~/repos/')
-            path = path.replace('@', base_dir, 1)
-        expanded_path = os.path.expanduser(path)
+        expanded_path = secure_resolve_path(path)
         if not os.path.exists(expanded_path): 
-            return f"Error: '{path}' does not exist."
+            return f"Error: '{expanded_path}' does not exist."
         if not os.path.isfile(expanded_path): 
-            return f"Error: '{path}' is not a file."
+            return f"Error: '{expanded_path}' is not a file."
         with open(expanded_path, 'r', encoding='utf-8') as f:
             lines = f.readlines()
             if len(lines) > 1000:
@@ -103,10 +139,7 @@ def read_file_tool(path: str) -> str:
 def write_file_tool(path: str, content: str) -> str:
     """Writes content to a file. Overwrites if it exists, creates if it doesn't. If path starts with @, it maps to ~/repos/."""
     try:
-        if path.startswith('@'): 
-            base_dir = os.environ.get('PI_META_WORKSPACE', '~/repos/')
-            path = path.replace('@', base_dir, 1)
-        expanded_path = os.path.expanduser(path)
+        expanded_path = secure_resolve_path(path)
         # Ensure directory exists
         os.makedirs(os.path.dirname(expanded_path), exist_ok=True)
         with open(expanded_path, 'w', encoding='utf-8') as f:
@@ -289,10 +322,13 @@ def run_real_swarm(team_dir: str, context: Dict[str, Any], focused_paths: list):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--team-dir", required=True)
-    parser.add_argument("--context", required=False, default="{}")
-    parser.add_argument("--focused-paths", required=False, default="[]")
+    parser.add_argument("--payload", required=True)
     args = parser.parse_args()
     
-    context_data = json.loads(args.context)
-    focused_paths = json.loads(args.focused_paths)
+    with open(args.payload, 'r') as f:
+        payload = json.load(f)
+        
+    context_data = payload.get("context", {})
+    focused_paths = payload.get("focused_paths", [])
+    
     run_real_swarm(args.team_dir, context_data, focused_paths)
