@@ -165,10 +165,10 @@ export default function (pi: ExtensionAPI) {
           PI_AGENT_LIBRARY: agentLibraryPath
       };
 
-      // jsonContext
+      
       const jsonPaths = JSON.stringify(focusedPaths).replace(/'/g, "'\\''");
       
-      const cmd = `~/.pi/agent/swarms/venv/bin/python ${runnerPath} --team-dir ${teamDir} --context '${jsonContext}' --focused-paths '${jsonPaths}' < /dev/null`;
+      
 
       context.ui.notify(`🚀 Swarm [${teamName}] is waking up and thinking... Streaming logs to console.`, "info");
       
