@@ -12,6 +12,48 @@ try:
 except ImportError as e:
     print(f"CrewAI imports failed: {e}")
     sys.exit(1)
+    
+# --- Custom JSON Observability Logger ---
+class JsonObservabilityLogger:
+    def __init__(self):
+        self.total_tokens = 0
+        
+    def log_event(self, event_type: str, data: dict):
+        payload = {
+            "event": event_type,
+            **data
+        }
+        # Print to stdout as JSON Lines so the Node orchestrator can parse it
+        print(json.dumps(payload), flush=True)
+
+logger = JsonObservabilityLogger()
+
+def step_callback(step_output):
+    """Hook called after each step of an agent."""
+    # Not all CrewAI versions expose tokens here perfectly, but we try
+    # to capture what the agent just did.
+    tool_name = getattr(step_output, 'tool', 'unknown_tool')
+    action = getattr(step_output, 'action', '')
+    thought = getattr(step_output, 'thought', '')
+    
+    logger.log_event("agent_step", {
+        "tool": tool_name,
+        "action": action,
+        "thought": thought[:100] + "..." if len(thought) > 100 else thought
+    })
+
+def task_callback(task_output):
+    """Hook called when a task finishes."""
+    agent_role = getattr(task_output.agent, 'role', 'Unknown Agent') if hasattr(task_output, 'agent') else 'Unknown'
+    summary = task_output.summary if hasattr(task_output, 'summary') else ''
+    
+    # Capture token usage if available in the output
+    token_usage = getattr(task_output, 'token_usage', {})
+    logger.log_event("task_completed", {
+        "agent": agent_role,
+        "summary": summary,
+        "tokens": token_usage
+    })
 
 def load_yaml(filepath):
     with open(filepath, 'r') as f:
@@ -198,7 +240,8 @@ def run_real_swarm(team_dir: str, context: Dict[str, Any], focused_paths: list):
             tools=agent_tools,
             max_iter=agent_config.get('max_iterations', 5),
             max_execution_time=agent_config.get('max_execution_time', None),
-            max_retry_limit=agent_config.get('max_retry_limit', 2)
+            max_retry_limit=agent_config.get('max_retry_limit', 2),
+            step_callback=step_callback
         )
         agents[agent_config['role']] = agent
 
@@ -211,7 +254,8 @@ def run_real_swarm(team_dir: str, context: Dict[str, Any], focused_paths: list):
         task = Task(
             description=desc,
             expected_output=task_config.get('expected_output', 'A valid output'),
-            agent=agents[task_config['agent']]
+            agent=agents[task_config['agent']],
+            callback=task_callback
         )
         tasks.append(task)
     # Determine process mode from team.yaml (default to sequential)
@@ -232,11 +276,15 @@ def run_real_swarm(team_dir: str, context: Dict[str, Any], focused_paths: list):
         manager_llm=manager_llm
     )
 
-
-    print(f"Starting real CrewAI Swarm execution with Gemini...")
+    logger.log_event("swarm_started", {"team": os.path.basename(team_dir), "mode": mode_str})
     result = crew.kickoff()
-    print("\n--- Final Output ---\n")
-    print(result)
+    
+    # Final token usage is usually attached to the crew object
+    final_usage = getattr(crew, 'usage_metrics', {})
+    logger.log_event("swarm_completed", {"final_tokens": final_usage})
+    
+    # We still print the final output for the user to read easily
+    print(f"\n--- Final Output ---\n{result}", flush=True)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
