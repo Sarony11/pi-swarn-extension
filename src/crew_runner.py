@@ -15,23 +15,31 @@ except ImportError as e:
     
 # --- Custom JSON Observability Logger ---
 class JsonObservabilityLogger:
-    def __init__(self):
+    def __init__(self, log_file: str):
         self.total_tokens = 0
+        self.log_file = log_file
         
     def log_event(self, event_type: str, data: dict):
         payload = {
             "event": event_type,
             **data
         }
-        # Print to stdout as JSON Lines so the Node orchestrator can parse it
+        # Write to dedicated JSONL file for decoupled observability
+        if self.log_file:
+            try:
+                with open(self.log_file, 'a') as f:
+                    f.write(json.dumps(payload) + "\n")
+            except Exception:
+                pass
+        # Fallback to stdout just in case
         print(json.dumps(payload), flush=True)
 
-logger = JsonObservabilityLogger()
+# Global logger initialized later when arguments are parsed
+logger = None
 
 def step_callback(step_output):
     """Hook called after each step of an agent."""
-    # Not all CrewAI versions expose tokens here perfectly, but we try
-    # to capture what the agent just did.
+    if not logger: return
     tool_name = getattr(step_output, 'tool', 'unknown_tool')
     action = getattr(step_output, 'action', '')
     thought = getattr(step_output, 'thought', '')
@@ -74,13 +82,14 @@ def task_callback(task_output):
         pass # Failsafe
         
     # Capture token usage if available in the output
-    token_usage = getattr(task_output, 'token_usage', {})
-    logger.log_event("task_completed", {
-        "agent": agent_role,
-        "summary": summary,
-        "tokens": token_usage,
-        "checkpoint": checkpoint_file
-    })
+    if logger:
+        token_usage = getattr(task_output, 'token_usage', {})
+        logger.log_event("task_completed", {
+            "agent": agent_role,
+            "summary": summary,
+            "tokens": token_usage,
+            "checkpoint": checkpoint_file
+        })
 
 def load_yaml(filepath):
     with open(filepath, 'r') as f:
@@ -309,12 +318,14 @@ def run_real_swarm(team_dir: str, context: Dict[str, Any], focused_paths: list):
         manager_llm=manager_llm
     )
 
-    logger.log_event("swarm_started", {"team": os.path.basename(team_dir), "mode": mode_str})
+    if logger:
+        logger.log_event("swarm_started", {"team": os.path.basename(team_dir), "mode": mode_str})
+    
     result = crew.kickoff()
     
-    # Final token usage is usually attached to the crew object
-    final_usage = getattr(crew, 'usage_metrics', {})
-    logger.log_event("swarm_completed", {"final_tokens": final_usage})
+    if logger:
+        final_usage = getattr(crew, 'usage_metrics', {})
+        logger.log_event("swarm_completed", {"final_tokens": final_usage})
     
     # We still print the final output for the user to read easily
     print(f"\n--- Final Output ---\n{result}", flush=True)
@@ -323,7 +334,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--team-dir", required=True)
     parser.add_argument("--payload", required=True)
+    parser.add_argument("--events-file", required=False, default="")
     args = parser.parse_args()
+    
+    global logger
+    logger = JsonObservabilityLogger(args.events_file)
     
     with open(args.payload, 'r') as f:
         payload = json.load(f)

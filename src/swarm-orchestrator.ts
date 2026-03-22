@@ -146,9 +146,11 @@ export default function (pi: ExtensionAPI) {
       };
       
       
+
       const crypto = require("crypto");
       const payloadId = crypto.randomBytes(8).toString("hex");
       const payloadPath = path.join(os.tmpdir(), `swarm_payload_${payloadId}.json`);
+      const eventsPath = path.join(os.homedir(), ".pi", "agent", "sessions", `swarm_events_${payloadId}.jsonl`);
       
       const payloadData = {
           context: contextVars,
@@ -179,7 +181,8 @@ export default function (pi: ExtensionAPI) {
           const args = [
             runnerPath, 
             "--team-dir", teamDir, 
-            "--payload", payloadPath
+            "--payload", payloadPath,
+            "--events-file", eventsPath
           ];
 
           const child = spawn(pythonPath, args, { 
@@ -195,39 +198,53 @@ export default function (pi: ExtensionAPI) {
           }, MAX_RUNTIME);
 
           
-          let jsonBuffer = "";
+          // Setup File Watcher for Decoupled Observability
+          let lastBytesRead = 0;
+          let watchInterval: any = null;
           
-          child.stdout.on('data', (data: any) => {
-              const text = data.toString();
+          const processEvents = () => {
+              if (!fs.existsSync(eventsPath)) return;
               
-              // We try to parse JSONL
-              const lines = text.split('\n');
-              
-              for (const line of lines) {
-                  if (!line.trim()) continue;
+              const stats = fs.statSync(eventsPath);
+              if (stats.size > lastBytesRead) {
+                  const stream = fs.createReadStream(eventsPath, {
+                      start: lastBytesRead,
+                      end: stats.size,
+                      encoding: 'utf-8'
+                  });
                   
-                  if (line.trim().startsWith('{') && line.trim().endsWith('}')) {
-                      try {
-                          const event = JSON.parse(line);
-                          if (event.event === 'agent_step') {
-                              context.ui.notify(`🤖 Agent Action: ${event.tool} -> ${event.action}`, "info");
-                          } else if (event.event === 'task_completed') {
-                              context.ui.notify(`✅ Task Completed by ${event.agent}`, "success");
-                          } else if (event.event === 'swarm_started') {
-                              context.ui.notify(`🚀 Swarm Started (${event.mode} mode)`, "info");
-                          } else if (event.event === 'swarm_completed') {
-                              // We could extract tokens here if CrewAI passes them
-                              context.ui.notify(`🏁 Swarm Finished.`, "success");
+                  stream.on('data', (chunk: string) => {
+                      const lines = chunk.split('\n');
+                      for (const line of lines) {
+                          if (!line.trim()) continue;
+                          try {
+                              const event = JSON.parse(line);
+                              if (event.event === 'agent_step') {
+                                  context.ui.notify(`🤖 Agent Action: ${event.tool}`, "info");
+                              } else if (event.event === 'task_completed') {
+                                  context.ui.notify(`✅ Task Completed by ${event.agent}`, "success");
+                              } else if (event.event === 'swarm_started') {
+                                  context.ui.notify(`🚀 Swarm Started (${event.mode} mode)`, "info");
+                              } else if (event.event === 'swarm_completed') {
+                                  context.ui.notify(`🏁 Swarm Finished.`, "success");
+                              }
+                          } catch (e) {
+                              // Ignore malformed JSONlines
                           }
-                      } catch (e) {
-                          // If parsing fails, just print as normal text
-                          process.stdout.write(`\x1b[36m[Swarm Output]\x1b[0m ${line}\n`);
                       }
-                  } else {
-                      // Normal text output
-                      process.stdout.write(`\x1b[36m[Swarm]\x1b[0m ${line}\n`);
-                  }
+                  });
+                  
+                  lastBytesRead = stats.size;
               }
+          };
+
+          // Start watching the events file every second
+          watchInterval = setInterval(processEvents, 1000);
+
+          // Standard stdout printing (without attempting to parse JSONs that break Node IPC)
+          child.stdout.on('data', (data: any) => {
+               // We only print raw console text now, ensuring Node's pipe doesn't crash on giant AI outputs
+               process.stdout.write(`\x1b[36m[Swarm Output]\x1b[0m ${data.toString()}`);
           });
 
 
@@ -238,6 +255,11 @@ export default function (pi: ExtensionAPI) {
 
           child.on('close', (code: number) => {
               clearTimeout(timeout);
+              if (watchInterval) clearInterval(watchInterval);
+              
+              // Final read to catch any trailing events
+              processEvents();
+              
               if (fs.existsSync(payloadPath)) {
                   fs.unlinkSync(payloadPath); // Cleanup payload
               }
