@@ -105,7 +105,9 @@ export default function (pi: ExtensionAPI) {
 
       const contextVars = { 
         workspace: cwd,
-        prompt: userPrompt || "Please analyze the current project state."
+        prompt: userPrompt || "Please analyze the current project state.",
+        focus_path: focusedPaths.length > 0 ? focusedPaths[0] : cwd,
+        all_focused_paths: focusedPaths.join(", ")
       };
       
       const jsonContext = JSON.stringify(contextVars).replace(/'/g, "'\\''");
@@ -113,18 +115,44 @@ export default function (pi: ExtensionAPI) {
       
       const cmd = `~/.pi/agent/swarms/venv/bin/python ${runnerPath} --team-dir ${teamDir} --context '${jsonContext}' --focused-paths '${jsonPaths}' < /dev/null`;
 
-      context.ui.notify(`🚀 Swarm [${teamName}] is waking up and thinking... this might take a minute depending on the LLM.`, "info");
+      context.ui.notify(`🚀 Swarm [${teamName}] is waking up and thinking... Streaming logs to console.`, "info");
       
-      const { exec } = require("child_process");
+      const { spawn } = require("child_process");
       return new Promise<void>((resolve) => {
-          exec(cmd, { encoding: "utf8" }, (error: any, stdout: string, stderr: string) => {
-              if (error) {
-                  const errorMsg = `[Swarm Error]\n\n${error.message}\n\n${stderr}`;
-                  context.ui.notify("Swarm encountered an error.", "error");
-                  console.log(errorMsg);
+          // Parse the command to use spawn
+          const pythonPath = `${os.homedir()}/.pi/agent/swarms/venv/bin/python`;
+          const args = [
+            runnerPath, 
+            "--team-dir", teamDir, 
+            "--context", jsonContext, 
+            "--focused-paths", jsonPaths
+          ];
+
+          const child = spawn(pythonPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+
+          // Safety Valve 1: Max Runtime Timeout (20 minutes)
+          const MAX_RUNTIME = 20 * 60 * 1000; 
+          const timeout = setTimeout(() => {
+              context.ui.notify(`⚠️ Swarm timed out after ${MAX_RUNTIME/60000} minutes. Killing process...`, "error");
+              child.kill('SIGKILL');
+          }, MAX_RUNTIME);
+
+          child.stdout.on('data', (data: any) => {
+              // Print standard output in real-time
+              process.stdout.write(`\x1b[36m[Swarm]\x1b[0m ${data.toString()}`);
+          });
+
+          child.stderr.on('data', (data: any) => {
+              // Print error output in real-time
+              process.stdout.write(`\x1b[31m[Swarm Error]\x1b[0m ${data.toString()}`);
+          });
+
+          child.on('close', (code: number) => {
+              clearTimeout(timeout);
+              if (code !== 0) {
+                  context.ui.notify(`❌ Swarm failed or was killed (code ${code}).`, "error");
               } else {
                   context.ui.notify("✅ Swarm completed successfully!", "info");
-                  console.log(`[Swarm Result: ${teamName}]\n\n` + stdout);
               }
               resolve();
           });
@@ -132,5 +160,5 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  console.log("[Swarm Extension] Loaded. Multi-Repo Smart Routing enabled.");
+  console.log("[Swarm Extension] Loaded. Multi-Repo Smart Routing and Log Streaming enabled.");
 }

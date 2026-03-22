@@ -150,6 +150,18 @@ def run_real_swarm(team_dir: str, context: Dict[str, Any], focused_paths: list):
         agent_model = agent_config.get('model', team_model)
         access_level = agent_config.get('tools_access_level', 'none').lower()
         
+        # Determine backstory: From separate markdown file or inline
+        backstory = agent_config.get('backstory', '')
+        prompt_file = agent_config.get('prompt_file')
+        
+        if prompt_file:
+            prompt_path = os.path.join(team_dir, prompt_file)
+            if os.path.exists(prompt_path):
+                with open(prompt_path, 'r', encoding='utf-8') as f:
+                    backstory = f.read()
+            else:
+                print(f"Warning: prompt_file '{prompt_file}' not found at {prompt_path}. Falling back to inline backstory.", file=sys.stderr)
+        
         agent_llm = LLM(
             model=agent_model,
             api_key=os.environ["GEMINI_API_KEY"]
@@ -174,7 +186,7 @@ def run_real_swarm(team_dir: str, context: Dict[str, Any], focused_paths: list):
             paths_str = "\n- ".join(focused_paths)
             focus_prompt = f"\n\n[WORKSPACE FOCUS] Your Root Workspace is {workspace}. However, for this specific task, you MUST focus your attention strictly on the following paths:\n- {paths_str}"
             
-        enhanced_backstory = agent_config['backstory'] + rbac_prompt + global_rules + focus_prompt
+        enhanced_backstory = backstory + rbac_prompt + global_rules + focus_prompt
 
         agent = Agent(
             role=agent_config['role'],
@@ -183,7 +195,10 @@ def run_real_swarm(team_dir: str, context: Dict[str, Any], focused_paths: list):
             verbose=True,
             allow_delegation=False,
             llm=agent_llm,
-            tools=agent_tools
+            tools=agent_tools,
+            max_iter=agent_config.get('max_iterations', 5),
+            max_execution_time=agent_config.get('max_execution_time', None),
+            max_retry_limit=agent_config.get('max_retry_limit', 2)
         )
         agents[agent_config['role']] = agent
 
