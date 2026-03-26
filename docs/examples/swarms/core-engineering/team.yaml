@@ -1,0 +1,27 @@
+name: "Core Engineering Team"
+description: "Specializes in code refactoring, structural architecture, and rigorous testing."
+process_mode: "sequential"
+model: "gemini/gemini-2.5-pro"
+
+agents:
+  - role: "Software Architect"
+    goal: "Design robust, modular, and decoupled software architectures"
+    prompt_file: "architect.md"
+    model: "gemini/gemini-3.1-pro-preview"
+    tools_access_level: "read"
+    max_iterations: 3
+    
+  - role: "Senior Backend Engineer"
+    goal: "Implement python code following modern best practices safely"
+    prompt_file: "backend_dev.md"
+    model: "gemini/gemini-3.1-pro-preview"
+    tools_access_level: "write"
+    max_iterations: 5
+    
+  - role: "QA and Test Engineer"
+    goal: "Ensure 100% test coverage and robust mock updates after refactors"
+    prompt_file: "qa_engineer.md"
+    model: "gemini/gemini-2.5-flash"
+    tools_access_level: "write"
+    max_iterations: 3
+    max_execution_time: 300 # 5 minutes max for QA to fix tests

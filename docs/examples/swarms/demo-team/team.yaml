@@ -1,0 +1,23 @@
+name: "Demo Swarm"
+description: "A simple demo team to test the integration"
+process_mode: "sequential"
+model: "gemini/gemini-2.5-flash"
+
+agents:
+  - role: "Researcher"
+    goal: "Gather facts and synthesize them quickly."
+    prompt_file: "researcher.md"
+    model: "gemini/gemini-3.1-pro-preview"
+    tools_access_level: "read-web"
+    max_iterations: 3
+    
+  - role: "Writer"
+    goal: "Draft clear, concise documentation based on research."
+    prompt_file: "writer.md"
+    model: "gemini/gemini-2.5-flash"
+    tools_access_level: "write"
+    max_iterations: 3
+
+mapping:
+  systems: ["demo-system"]
+  domains: ["experimental"]

@@ -1,0 +1,23 @@
+name: "Code Review Team"
+description: "A team specialized in analyzing code, finding bugs, and proposing improvements."
+process_mode: "sequential"
+model: "gemini/gemini-2.5-pro"
+
+agents:
+  - role: "Senior Developer"
+    goal: "Analyze the provided code or context and identify structural issues, bugs, or bad practices."
+    prompt_file: "senior_dev.md"
+    model: "gemini/gemini-3.1-pro-preview"
+    tools_access_level: "read-web"
+    max_iterations: 3
+    
+  - role: "Security Engineer"
+    goal: "Review the Senior Developer's findings and the context to point out any security risks."
+    prompt_file: "security_engineer.md"
+    model: "gemini/gemini-2.5-flash"
+    tools_access_level: "read-web"
+    max_iterations: 3
+
+mapping:
+  systems: ["service", "library"]
+  domains: ["mms", "personal"]

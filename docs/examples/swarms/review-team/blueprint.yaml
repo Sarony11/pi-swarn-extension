@@ -1,0 +1,8 @@
+tasks:
+  - description: "Please review the following request from the user regarding the project '{{topic}}' in the domain '{{domain}}'. User Request: {{prompt}}. Provide a detailed list of potential issues, bad practices, and areas for improvement."
+    expected_output: "A bulleted list of code quality and architectural findings."
+    agent: "Senior Developer"
+
+  - description: "Based on the initial code review and the user's original request: '{{prompt}}', perform a security-focused audit. Are there any injection vectors, missing validations, or data exposure risks?"
+    expected_output: "A security report highlighting vulnerabilities and required mitigations."
+    agent: "Security Engineer"

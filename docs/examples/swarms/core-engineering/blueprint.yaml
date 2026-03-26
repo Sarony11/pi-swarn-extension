@@ -1,0 +1,12 @@
+tasks:
+  - description: "Analyze the legacy code at {{focus_path}}. The user specifically requested: {{prompt}}. Identify architectural smells (SRP violations, tight coupling) and design new modular structures using interfaces/protocols. Generate a REFACTOR_PLAN.md in the current directory."
+    expected_output: "A detailed REFACTOR_PLAN.md document outlining the new architecture."
+    agent: "Software Architect"
+
+  - description: "Read REFACTOR_PLAN.md and the legacy code at {{focus_path}}. Implement the refactor by creating new files, moving logic, and migrating to modern Python (3.12+, async, Pydantic) without changing business logic."
+    expected_output: "Modified python files matching the architect's plan."
+    agent: "Senior Backend Engineer"
+
+  - description: "Analyze the testing suite for the refactored code. Fix broken imports, adapt mock objects, resolve deprecation warnings, and ensure tests pass. If tests fail due to new string formatting (like emojis), modify the test asserts to match the new output. MAX ATTEMPTS: 3. If you cannot fix the tests within 3 tries, output a final error report and finish the task."
+    expected_output: "A green test suite and updated test files, OR a final error report after 3 failed attempts."
+    agent: "QA and Test Engineer"

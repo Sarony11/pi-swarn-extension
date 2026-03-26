@@ -1,0 +1,8 @@
+tasks:
+  - description: "Investigate {{topic}} and extract key facts."
+    expected_output: "A bulleted list of facts."
+    agent: "Researcher"
+
+  - description: "Using the research, write a short paragraph explaining {{topic}}."
+    expected_output: "A well-written paragraph."
+    agent: "Writer"
