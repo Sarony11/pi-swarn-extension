@@ -91,9 +91,44 @@ export default function (pi: ExtensionAPI) {
          agentLibraryPath = path.join(metaWorkspace, "agent-library");
       }
       
-      const teamDir = path.join(agentLibraryPath, "swarms", teamName);
-      if (!fs.existsSync(teamDir)) {
-        context.ui.notify(`[Swarm Error] Team directory not found at ${teamDir}`);
+      const swarmsDir = path.join(agentLibraryPath, "swarms");
+      let teamDir = "";
+      
+      if (fs.existsSync(swarmsDir)) {
+          const swarms = fs.readdirSync(swarmsDir);
+          
+          // 1. Try exact folder match
+          if (swarms.includes(teamName)) {
+              teamDir = path.join(swarmsDir, teamName);
+          } else {
+              // 2. Try fuzzy matching (ignore spaces, dashes, case)
+              const normalizedSearch = teamName.toLowerCase().replace(/[^a-z0-9]/g, "");
+              for (const swarmFolder of swarms) {
+                  const normalizedFolder = swarmFolder.toLowerCase().replace(/[^a-z0-9]/g, "");
+                  if (normalizedFolder === normalizedSearch || normalizedFolder.includes(normalizedSearch)) {
+                      teamDir = path.join(swarmsDir, swarmFolder);
+                      break;
+                  }
+                  
+                  // 3. Try reading team.yaml friendly name
+                  const yamlPath = path.join(swarmsDir, swarmFolder, "team.yaml");
+                  if (fs.existsSync(yamlPath)) {
+                      const yamlContent = fs.readFileSync(yamlPath, "utf-8");
+                      const nameMatch = yamlContent.match(/name:\s*"?([^"\n]+)"?/);
+                      if (nameMatch) {
+                          const yamlName = nameMatch[1].toLowerCase().replace(/[^a-z0-9]/g, "");
+                          if (yamlName === normalizedSearch || yamlName.includes(normalizedSearch)) {
+                              teamDir = path.join(swarmsDir, swarmFolder);
+                              break;
+                          }
+                      }
+                  }
+              }
+          }
+      }
+
+      if (!teamDir || !fs.existsSync(teamDir)) {
+        context.ui.notify(`[Swarm Error] Team '${teamName}' not found in ${swarmsDir}`, "error");
         return;
       }
 
@@ -105,26 +140,133 @@ export default function (pi: ExtensionAPI) {
 
       const contextVars = { 
         workspace: cwd,
-        prompt: userPrompt || "Please analyze the current project state."
+        prompt: userPrompt || "Please analyze the current project state.",
+        focus_path: focusedPaths.length > 0 ? focusedPaths[0] : cwd,
+        all_focused_paths: focusedPaths.join(", ")
       };
       
-      const jsonContext = JSON.stringify(contextVars).replace(/'/g, "'\\''");
+      
+
+      const crypto = require("crypto");
+      const payloadId = crypto.randomBytes(8).toString("hex");
+      const payloadPath = path.join(os.tmpdir(), `swarm_payload_${payloadId}.json`);
+      const eventsPath = path.join(os.homedir(), ".pi", "agent", "sessions", `swarm_events_${payloadId}.jsonl`);
+      
+      const payloadData = {
+          context: contextVars,
+          focused_paths: focusedPaths
+      };
+      fs.writeFileSync(payloadPath, JSON.stringify(payloadData));
+
+      // Sanitize Environment Variables (Prevent Leakage)
+      const sanitizedEnv = {
+          PATH: process.env.PATH, // Needed for python/binaries
+          GEMINI_API_KEY: process.env.GEMINI_API_KEY,
+          BRAVE_SEARCH_API_KEY: process.env.BRAVE_SEARCH_API_KEY,
+          PI_META_WORKSPACE: metaWorkspace,
+          PI_AGENT_LIBRARY: agentLibraryPath
+      };
+
+      
       const jsonPaths = JSON.stringify(focusedPaths).replace(/'/g, "'\\''");
       
-      const cmd = `~/.pi/agent/swarms/venv/bin/python ${runnerPath} --team-dir ${teamDir} --context '${jsonContext}' --focused-paths '${jsonPaths}' < /dev/null`;
-
-      context.ui.notify(`🚀 Swarm [${teamName}] is waking up and thinking... this might take a minute depending on the LLM.`, "info");
       
-      const { exec } = require("child_process");
+
+      context.ui.notify(`🚀 Swarm [${teamName}] is waking up and thinking... Streaming logs to console.`, "info");
+      
+      const { spawn } = require("child_process");
       return new Promise<void>((resolve) => {
-          exec(cmd, { encoding: "utf8" }, (error: any, stdout: string, stderr: string) => {
-              if (error) {
-                  const errorMsg = `[Swarm Error]\n\n${error.message}\n\n${stderr}`;
-                  context.ui.notify("Swarm encountered an error.", "error");
-                  console.log(errorMsg);
+          // Parse the command to use spawn
+          const pythonPath = `${os.homedir()}/.pi/agent/swarms/venv/bin/python`;
+          const args = [
+            runnerPath, 
+            "--team-dir", teamDir, 
+            "--payload", payloadPath,
+            "--events-file", eventsPath
+          ];
+
+          const child = spawn(pythonPath, args, { 
+              stdio: ['ignore', 'pipe', 'pipe'],
+              env: sanitizedEnv
+          });
+
+          // Safety Valve 1: Max Runtime Timeout (20 minutes)
+          const MAX_RUNTIME = 20 * 60 * 1000; 
+          const timeout = setTimeout(() => {
+              context.ui.notify(`⚠️ Swarm timed out after ${MAX_RUNTIME/60000} minutes. Killing process...`, "error");
+              child.kill('SIGKILL');
+          }, MAX_RUNTIME);
+
+          
+          // Setup File Watcher for Decoupled Observability
+          let lastBytesRead = 0;
+          let watchInterval: any = null;
+          
+          const processEvents = () => {
+              if (!fs.existsSync(eventsPath)) return;
+              
+              const stats = fs.statSync(eventsPath);
+              if (stats.size > lastBytesRead) {
+                  const stream = fs.createReadStream(eventsPath, {
+                      start: lastBytesRead,
+                      end: stats.size,
+                      encoding: 'utf-8'
+                  });
+                  
+                  stream.on('data', (chunk: string) => {
+                      const lines = chunk.split('\n');
+                      for (const line of lines) {
+                          if (!line.trim()) continue;
+                          try {
+                              const event = JSON.parse(line);
+                              if (event.event === 'agent_step') {
+                                  context.ui.notify(`🤖 Agent Action: ${event.tool}`, "info");
+                              } else if (event.event === 'task_completed') {
+                                  context.ui.notify(`✅ Task Completed by ${event.agent}`, "success");
+                              } else if (event.event === 'swarm_started') {
+                                  context.ui.notify(`🚀 Swarm Started (${event.mode} mode)`, "info");
+                              } else if (event.event === 'swarm_completed') {
+                                  context.ui.notify(`🏁 Swarm Finished.`, "success");
+                              }
+                          } catch (e) {
+                              // Ignore malformed JSONlines
+                          }
+                      }
+                  });
+                  
+                  lastBytesRead = stats.size;
+              }
+          };
+
+          // Start watching the events file every second
+          watchInterval = setInterval(processEvents, 1000);
+
+          // Standard stdout printing (without attempting to parse JSONs that break Node IPC)
+          child.stdout.on('data', (data: any) => {
+               // We only print raw console text now, ensuring Node's pipe doesn't crash on giant AI outputs
+               process.stdout.write(`\x1b[36m[Swarm Output]\x1b[0m ${data.toString()}`);
+          });
+
+
+          child.stderr.on('data', (data: any) => {
+              // Print error output in real-time
+              process.stdout.write(`\x1b[31m[Swarm Error]\x1b[0m ${data.toString()}`);
+          });
+
+          child.on('close', (code: number) => {
+              clearTimeout(timeout);
+              if (watchInterval) clearInterval(watchInterval);
+              
+              // Final read to catch any trailing events
+              processEvents();
+              
+              if (fs.existsSync(payloadPath)) {
+                  fs.unlinkSync(payloadPath); // Cleanup payload
+              }
+              if (code !== 0) {
+                  context.ui.notify(`❌ Swarm failed or was killed (code ${code}).`, "error");
               } else {
                   context.ui.notify("✅ Swarm completed successfully!", "info");
-                  console.log(`[Swarm Result: ${teamName}]\n\n` + stdout);
               }
               resolve();
           });
@@ -132,5 +274,5 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  console.log("[Swarm Extension] Loaded. Multi-Repo Smart Routing enabled.");
+  console.log("[Swarm Extension] Loaded. Multi-Repo Smart Routing and Log Streaming enabled.");
 }
